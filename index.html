@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGIS Kabupaten Sleman - Acara 12</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #fff0f6;
+        }
+
+        header {
+            text-align: center;
+            background-color: #f8d7e8;
+            color: #d63384;
+            padding: 15px;
+        }
+
+        header h2 {
+            margin: 5px;
+        }
+
+        header p {
+            margin: 8px 0 0;
+            color: #a83270;
+        }
+
+        #map {
+            height: calc(100vh - 110px);
+            width: 100%;
+        }
+
+        .legend {
+            background: white;
+            padding: 12px 15px;
+            border-radius: 8px;
+            line-height: 25px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            max-height: 260px;
+            overflow-y: auto;
+            min-width: 175px;
+        }
+
+        .legend h4 {
+            margin: 3px 0 8px;
+            color: #d63384;
+        }
+
+        .legend-section {
+            font-weight: bold;
+            margin-top: 8px;
+        }
+
+        .symbol {
+            display: inline-block;
+            width: 18px;
+            height: 12px;
+            margin-right: 7px;
+            vertical-align: middle;
+        }
+
+        .point-symbol {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: #e83e8c;
+            border: 2px solid white;
+            box-shadow: 0 0 2px #555;
+        }
+
+        .area-symbol {
+            background: #b9e6a5;
+            border: 1px solid #558b45;
+        }
+
+        .road-symbol {
+            height: 3px;
+            background: red;
+        }
+
+        .hospital-symbol {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: #3867d6;
+        }
+
+        .popup-kecamatan {
+            min-width: 210px;
+            font-family: Arial, sans-serif;
+        }
+
+        .popup-kecamatan h3 {
+            color: #d63384;
+            margin: 0 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f8d7e8;
+            font-size: 17px;
+        }
+
+        .popup-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 9px 0;
+            font-size: 13px;
+        }
+
+        .popup-label {
+            color: #666;
+        }
+
+        .popup-value {
+            font-weight: bold;
+            color: #333;
+            text-align: right;
+        }
+
+        .popup-footer {
+            border-top: 1px solid #eee;
+            margin-top: 10px;
+            padding-top: 8px;
+            color: #888;
+            font-size: 11px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h2>WebGIS Kabupaten Sleman</h2>
+        <p>Sistem Informasi Geografis Interaktif Berbasis GeoServer dan Leaflet</p>
+    </header>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+
+        // Membuat peta
+        var map = L.map("map").setView([-7.677567, 110.406899], 11);
+
+        // Basemap OpenStreetMap
+        var osm = L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom: 19,
+                attribution: "&copy; OpenStreetMap contributors"
+            }
+        );
+
+        // Basemap Satelit
+        var imagery = L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            {
+                maxZoom: 19,
+                attribution: "Tiles &copy; Esri"
+            }
+        );
+
+        // Menampilkan basemap awal
+        osm.addTo(map);
+
+        // Alamat GeoServer
+        var geoserver = "http://localhost:8080/geoserver/wms";
+
+        // Layer batas administrasi desa
+        var area = L.tileLayer.wms(geoserver, {
+            layers: "pgweb11:ADMINISTRASIDESA_AR_25K",
+            transparent: true,
+            format: "image/png",
+            version: "1.1.1"
+        });
+
+        // Layer jaringan jalan
+        var garis = L.tileLayer.wms(geoserver, {
+            layers: "pgweb11:jalan",
+            transparent: true,
+            format: "image/png",
+            version: "1.1.1"
+        });
+
+        // Layer lokasi rumah sakit
+        var rumahSakit = L.tileLayer.wms(geoserver, {
+            layers: "pgweb11:RUMAHSAKIT_PT_25K",
+            transparent: true,
+            format: "image/png",
+            version: "1.1.1"
+        });
+
+        // Menampilkan layer GeoServer
+        area.addTo(map);
+        garis.addTo(map);
+        rumahSakit.addTo(map);
+
+        // Membuat kelompok layer titik kecamatan
+        var titikKecamatan = L.layerGroup().addTo(map);
+
+        // Mengambil data kecamatan dari PHP
+        fetch("data_kecamatan.php")
+            .then(function(response) {
+
+                if (!response.ok) {
+                    throw new Error("Gagal menghubungi file PHP");
+                }
+
+                return response.json();
+
+            })
+            .then(function(result) {
+
+                if (result.status !== "success") {
+                    throw new Error(result.pesan || "Data tidak berhasil diambil");
+                }
+
+                // Menampilkan setiap titik kecamatan
+                result.data.forEach(function(item) {
+
+                    var marker = L.circleMarker(
+                        [item.latitude, item.longitude],
+                        {
+                            radius: 8,
+                            color: "#ffffff",
+                            weight: 2,
+                            fillColor: "#e83e8c",
+                            fillOpacity: 1
+                        }
+                    );
+
+                    // Membuat isi popup
+                    var popup = `
+                        <div class="popup-kecamatan">
+
+                            <h3>Kecamatan ${item.kecamatan}</h3>
+
+                            <div class="popup-row">
+                                <span class="popup-label">Luas Area</span>
+                                <span class="popup-value">
+                                    ${Number(item.luas).toLocaleString("id-ID", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                    })} km²
+                                </span>
+                            </div>
+
+                            <div class="popup-row">
+                                <span class="popup-label">Jumlah Penduduk</span>
+                                <span class="popup-value">
+                                    ${Number(item.jumlah_penduduk).toLocaleString("id-ID")} jiwa
+                                </span>
+                            </div>
+
+                            <div class="popup-row">
+                                <span class="popup-label">Latitude</span>
+                                <span class="popup-value">
+                                    ${Number(item.latitude).toFixed(6)}
+                                </span>
+                            </div>
+
+                            <div class="popup-row">
+                                <span class="popup-label">Longitude</span>
+                                <span class="popup-value">
+                                    ${Number(item.longitude).toFixed(6)}
+                                </span>
+                            </div>
+
+                            <div class="popup-footer">
+                                Data Kecamatan Kabupaten Sleman
+                            </div>
+
+                        </div>
+                    `;
+
+                    // Menghubungkan popup dengan titik
+                    marker.bindPopup(popup);
+
+                    // Memasukkan titik ke peta
+                    marker.addTo(titikKecamatan);
+
+                });
+
+                console.log("Data kecamatan berhasil ditampilkan:", result.data);
+
+            })
+            .catch(function(error) {
+
+                console.error("Kesalahan mengambil data:", error);
+
+                alert("Data kecamatan gagal dimuat. Periksa koneksi PHP dan MySQL.");
+
+            });
+
+        // Pilihan basemap
+        var baseMaps = {
+            "OpenStreetMap": osm,
+            "Satelit (Imagery)": imagery
+        };
+
+        // Pilihan layer
+        var overlayMaps = {
+            "Batas Administrasi Desa": area,
+            "Jaringan Jalan": garis,
+            "Lokasi Rumah Sakit": rumahSakit,
+            "Titik Kecamatan": titikKecamatan
+        };
+
+        // Menambahkan kontrol layer
+        L.control.layers(baseMaps, overlayMaps, {
+            collapsed: false,
+            position: "topright"
+        }).addTo(map);
+
+        // Membuat legenda
+        var legend = L.control({
+            position: "bottomleft"
+        });
+
+        legend.onAdd = function() {
+
+            var div = L.DomUtil.create("div", "legend");
+
+            div.innerHTML = `
+                <h4>Legenda Peta</h4>
+
+                <div class="legend-section">Titik Kecamatan</div>
+                <div>
+                    <span class="symbol point-symbol"></span>
+                    Lokasi Kecamatan
+                </div>
+
+                <div class="legend-section">Lokasi Rumah Sakit</div>
+                <div>
+                    <span class="symbol hospital-symbol"></span>
+                    Rumah Sakit
+                </div>
+
+                <div class="legend-section">Jaringan Jalan</div>
+                <div>
+                    <span class="symbol road-symbol"></span>
+                    Jaringan Jalan
+                </div>
+
+                <div class="legend-section">Batas Administrasi</div>
+                <div>
+                    <span class="symbol area-symbol"></span>
+                    Batas Desa
+                </div>
+            `;
+
+            L.DomEvent.disableClickPropagation(div);
+            L.DomEvent.disableScrollPropagation(div);
+
+            return div;
+        };
+
+        // Menampilkan legenda
+        legend.addTo(map);
+
+    </script>
+
+</body>
+</html>
